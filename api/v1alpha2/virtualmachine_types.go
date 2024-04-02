@@ -90,6 +90,20 @@ const (
 )
 
 const (
+	// VirtualMachineReconciliationCondition exposes the status of VirtualMachine reconciliation.
+	VirtualMachineReconciliationCondition = "VirtualMachineReconciliation"
+
+	// VirtualMachineReconciliationRunningReason indicates that VirtualMachine
+	// reconciliation is running.
+	VirtualMachineReconciliationRunningReason = "VirtualMachineReconciliationRunning"
+
+	// VirtualMachineReconciliationPausedReason indicates that VirtualMachine
+	// reconciliation is being paused.
+	VirtualMachineReconciliationPausedReason = "VirtualMachineReconciliationPaused"
+
+)
+
+const (
 	// PauseAnnotation is an annotation that prevents a VM from being
 	// reconciled.
 	//
@@ -134,6 +148,19 @@ const (
 	// PVCDiskDataExtraConfigKey is the ExtraConfig key to persist the VM's
 	// PVC disk data in JSON, compressed using gzip and base64-encoded.
 	PVCDiskDataExtraConfigKey = "vmservice.virtualmachine.pvc.disk.data"
+)
+
+const (
+	// PauseVMExtraConfigKey is the ExtraConfig key to allow override
+	// operations for admins to pause reconciliation of VM Service VM.
+	PauseVMExtraConfigKey = "vmservice.virtualmachine.pause"
+
+	// PausedVMLabelKey is the label key to identify VMs that reconciliation
+	// are paused. Value will specify whose operation is responsible for
+	// the pause. It can be admins or devops or both.
+	//
+	// Only privileged user can edit this label.
+	PausedVMLabelKey = GroupName + "/paused-vm"
 )
 
 // VirtualMachinePowerState defines a VM's desired and observed power states.
