@@ -1040,6 +1040,13 @@ func (s *Session) UpdateVirtualMachine(
 		return err
 	}
 
+	// If VM is being Paused, only update status but not power state
+	if paused := updateVMPaused(vmCtx, moVM); paused {
+		vmCtx.Logger.Info("Pausing Updating VirtualMachine")
+		vmlifecycle.UpdateStatus(vmCtx, s.K8sClient, vcVM, moVM)
+		return nil
+	}
+
 	// Translate the VM's current power state into the VM Op power state value.
 	var existingPowerState vmopv1.VirtualMachinePowerState
 	switch moVM.Summary.Runtime.PowerState {
@@ -1092,4 +1099,37 @@ func (s *Session) UpdateVirtualMachine(
 	}
 
 	return err
+}
+
+func updateVMPaused(
+	vmCtx context.VirtualMachineContextA2,
+	moVM *mo.VirtualMachine) bool {
+
+	vm := vmCtx.VM
+	var adminPaused, devopsPaused bool
+	// Check if VI Admin paused this VM by adding ExtraConfig key
+	for i := range moVM.Config.ExtraConfig {
+		if o := moVM.Config.ExtraConfig[i].GetOptionValue(); o != nil {
+			if o.Key == vmopv1.PauseVMExtraConfigKey && o.Value == constants.ExtraConfigTrue {
+				adminPaused = true
+				break
+			}
+		}
+	}
+	if _, ok := vm.Annotations[vmopv1.PauseAnnotation]; ok {
+		devopsPaused = true
+	}
+
+	// Source of truth is EC and Annotation
+	// No need to check previous label val
+	if adminPaused && devopsPaused {
+		vm.Labels[vmopv1.PausedVMLabelKey] = "both"
+	} else if adminPaused {
+		vm.Labels[vmopv1.PausedVMLabelKey] = "admin"
+	} else if devopsPaused {
+		vm.Labels[vmopv1.PausedVMLabelKey] = "devops"
+	} else {
+		delete(vm.Labels, vmopv1.PausedVMLabelKey)
+	}
+	return adminPaused || devopsPaused
 }

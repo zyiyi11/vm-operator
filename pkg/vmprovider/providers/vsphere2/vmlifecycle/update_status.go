@@ -98,6 +98,7 @@ func UpdateStatus(
 		errs = append(errs, err)
 	}
 
+	MarkReconciliationCondition(vmCtx.VM)
 	MarkVMToolsRunningStatusCondition(vmCtx.VM, moVM.Guest)
 	MarkCustomizationInfoCondition(vmCtx.VM, moVM.Guest)
 	MarkBootstrapCondition(vmCtx.VM, moVM.Config)
@@ -365,6 +366,21 @@ func MarkCustomizationInfoCondition(vm *vmopv1.VirtualMachine, guestInfo *types.
 			errorMsg = "Unexpected VM Customization status"
 		}
 		conditions.MarkFalse(vm, vmopv1.GuestCustomizationCondition, "Unknown", errorMsg)
+	}
+}
+func MarkReconciliationCondition(vm *vmopv1.VirtualMachine) {
+	switch vm.Labels[vmopv1.PausedVMLabelKey] {
+	case "devops":
+		conditions.MarkFalse(vm, vmopv1.VirtualMachineReconciliationCondition, vmopv1.VirtualMachineReconciliationPausedReason,
+			"Virtual Machine reconciliation paused by DevOps")
+	case "admin":
+		conditions.MarkFalse(vm, vmopv1.VirtualMachineReconciliationCondition, vmopv1.VirtualMachineReconciliationPausedReason,
+			"Virtual Machine reconciliation paused by Admin")
+	case "both":
+		conditions.MarkFalse(vm, vmopv1.VirtualMachineReconciliationCondition, vmopv1.VirtualMachineReconciliationPausedReason,
+			"Virtual Machine reconciliation paused by Admin, DevOps")
+	default:
+		conditions.MarkTrue(vm, vmopv1.VirtualMachineReconciliationCondition)
 	}
 }
 

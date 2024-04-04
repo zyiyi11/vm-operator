@@ -260,10 +260,15 @@ if [[ -z $SV_IPS_CSL ]] ; then
     SV_IPS_CSL=$(sv_get_cp_ips)
 fi
 
-mapfile -t SV_IPS <<< "$(echo "$SV_IPS_CSL" | tr "," "\n")"
+SV_IPS=()
+while IFS= read -r ip; do
+    SV_IPS+=("$ip")
+done <<< "$(echo "$SV_IPS_CSL" | tr ',' '\n')"
+
 if [[ ${#SV_IPS[@]} -eq 0 ]] ; then
     fatal "Could not parse Supervisor IPs list: $SV_IPS_CSL"
 fi
+
 
 log "Supervisor CP IPs: ${SV_IPS[*]}"
 
