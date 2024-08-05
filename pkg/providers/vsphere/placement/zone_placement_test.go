@@ -4,13 +4,17 @@
 package placement_test
 
 import (
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	vimtypes "github.com/vmware/govmomi/vim25/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	vmopv1 "github.com/vmware-tanzu/vm-operator/api/v1alpha3"
+	topologyv1 "github.com/vmware-tanzu/vm-operator/external/tanzu-topology/api/v1alpha1"
 	pkgctx "github.com/vmware-tanzu/vm-operator/pkg/context"
 	"github.com/vmware-tanzu/vm-operator/pkg/providers/vsphere/constants"
 	"github.com/vmware-tanzu/vm-operator/pkg/providers/vsphere/placement"
@@ -133,6 +137,15 @@ func vcSimPlacement() {
 						// Current contract is the caller must look this up based on the pre-assigned zone but
 						// we might want to change that later.
 						Expect(result.PoolMoRef.Value).To(BeEmpty())
+					})
+
+					It("returns an error if assigned zone is being deleted", func() {
+						zone := &topologyv1.Zone{}
+						Expect(ctx.Client.Get(ctx, client.ObjectKey{Name: zoneName, Namespace: vm.Namespace}, zone)).To(Succeed())
+						zone.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+						result, err := placement.Placement(vmCtx, ctx.Client, ctx.VCClient.Client, configSpec, "")
+						Expect(err).To(MatchError("no placement candidates available"))
+						Expect(result).To(BeNil())
 					})
 				})
 

@@ -635,7 +635,7 @@ func (vs *vSphereVMProvider) vmCreateGetFolderAndRPMoIDs(
 
 	if createArgs.ResourcePoolMoID == "" {
 		// We did not do placement so find this namespace/zone ResourcePool and Folder.
-
+		// If specified zone is being deleted, return err.
 		nsFolderMoID, rpMoID, err := topology.GetNamespaceFolderAndRPMoID(vmCtx, vs.k8sClient,
 			vmCtx.VM.Labels[topology.KubernetesTopologyZoneLabelKey], vmCtx.VM.Namespace)
 		if err != nil {

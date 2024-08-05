@@ -74,6 +74,7 @@ const (
 	invalidMinHardwareVersionDowngrade       = "cannot downgrade hardware version"
 	invalidMinHardwareVersionPowerState      = "cannot upgrade hardware version unless powered off"
 	invalidImageKind                         = "supported: " + vmiKind + "; " + cvmiKind
+	invalidZone                              = "cannot use zone that is being deleted"
 	restrictedToPrivUsers                    = "restricted to privileged users"
 )
 
@@ -1132,8 +1133,13 @@ func (v validator) validateAvailabilityZone(ctx *pkgctx.WebhookRequestContext, v
 		if pkgcfg.FromContext(ctx).Features.WorkloadDomainIsolation {
 			// Validate the name of the provided zone.
 			// It is the same name as az.
-			if _, err := topology.GetZone(ctx.Context, v.client, zoneLabelVal, vm.Namespace); err != nil {
+			zone, err := topology.GetZone(ctx.Context, v.client, zoneLabelVal, vm.Namespace)
+			if err != nil {
 				return append(allErrs, field.Invalid(zoneLabelPath, zoneLabelVal, err.Error()))
+			}
+			//  when deletion of a Zone is initiated, deletionTimestamp is set.
+			if !zone.DeletionTimestamp.IsZero() {
+				return append(allErrs, field.Invalid(zoneLabelPath, zoneLabelVal, invalidZone))
 			}
 		}
 		if _, err := topology.GetAvailabilityZone(ctx.Context, v.client, zoneLabelVal); err != nil {

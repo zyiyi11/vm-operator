@@ -31,17 +31,27 @@ type Result struct {
 	// TODO: Datastore, whatever else as we need it.
 }
 
-func doesVMNeedPlacement(vmCtx pkgctx.VirtualMachineContext) (res Result, needZonePlacement, needInstanceStoragePlacement bool) {
-	res.ZonePlacement = true
+func doesVMNeedPlacement(vmCtx pkgctx.VirtualMachineContext, client ctrlclient.Client) (Result, bool, bool) {
+	var res Result
+	var needZonePlacement, needInstanceStoragePlacement bool
 
-	if zoneName := vmCtx.VM.Labels[topology.KubernetesTopologyZoneLabelKey]; zoneName != "" {
-		// Zone has already been selected.
-		res.ZoneName = zoneName
+	res.ZonePlacement = true
+	zoneName := vmCtx.VM.Labels[topology.KubernetesTopologyZoneLabelKey]
+	if zoneName != "" {
+		if pkgcfg.FromContext(vmCtx).Features.WorkloadDomainIsolation {
+			zone, err := topology.GetZone(vmCtx.Context, client, zoneName, vmCtx.VM.Namespace)
+			// If selected zone is being deleted at this time, we will need zone placement.
+			if err != nil || !zone.DeletionTimestamp.IsZero() {
+				needZonePlacement = true
+			}
+		}
 	} else {
 		// VM does not have a zone already assigned so we need to select one.
 		needZonePlacement = true
 	}
-
+	if !needZonePlacement {
+		res.ZoneName = zoneName
+	}
 	if pkgcfg.FromContext(vmCtx).Features.InstanceStorage {
 		if instancestorage.IsPresent(vmCtx.VM) {
 			res.InstanceStoragePlacement = true
@@ -55,8 +65,7 @@ func doesVMNeedPlacement(vmCtx pkgctx.VirtualMachineContext) (res Result, needZo
 			}
 		}
 	}
-
-	return
+	return res, needZonePlacement, needInstanceStoragePlacement
 }
 
 // lookupChildRPs lookups the child ResourcePool under each parent ResourcePool. A VM with a ResourcePolicy
@@ -112,6 +121,10 @@ func getPlacementCandidates(
 			zones = append(zones, zone)
 		}
 		for _, zone := range zones {
+			// Filter out the zone that is to be deleted, so we don't have it as a candidate.
+			if !zone.DeletionTimestamp.IsZero() {
+				continue
+			}
 			rpMoIDs := zone.Spec.ManagedVMs.PoolMoIDs
 			if childRPName != "" {
 				childRPMoIDs := lookupChildRPs(vmCtx, vcClient, rpMoIDs, zone.Name, childRPName)
@@ -322,7 +335,7 @@ func Placement(
 	configSpec vimtypes.VirtualMachineConfigSpec,
 	childRPName string) (*Result, error) {
 
-	existingRes, zonePlacement, instanceStoragePlacement := doesVMNeedPlacement(vmCtx)
+	existingRes, zonePlacement, instanceStoragePlacement := doesVMNeedPlacement(vmCtx, client)
 	if !zonePlacement && !instanceStoragePlacement {
 		return &existingRes, nil
 	}
