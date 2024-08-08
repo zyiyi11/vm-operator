@@ -24,7 +24,8 @@ var (
 	// ErrNoAvailabilityZones occurs when no availability zones are detected.
 	ErrNoAvailabilityZones = errors.New("no availability zones")
 
-	ErrNoZones = errors.New("no zones in specified namespace")
+	ErrNoZones     = errors.New("no zones in specified namespace")
+	ErrZoneDeleted = errors.New("specified zone is being deleted")
 )
 
 // +kubebuilder:rbac:groups=topology.tanzu.vmware.com,resources=availabilityzones,verbs=get;list;watch
@@ -69,12 +70,14 @@ func GetNamespaceFolderAndRPMoID(
 		if err != nil {
 			return "", "", err
 		}
+		if !zone.DeletionTimestamp.IsZero() {
+			return "", "", ErrZoneDeleted
+		}
 		if len(zone.Spec.ManagedVMs.PoolMoIDs) != 0 {
 			return zone.Spec.ManagedVMs.FolderMoID, zone.Spec.ManagedVMs.PoolMoIDs[0], nil
 		}
 		return zone.Spec.ManagedVMs.FolderMoID, "", nil
 	}
-
 	availabilityZone, err := GetAvailabilityZone(ctx, client, availabilityZoneName)
 	if err != nil {
 		return "", "", err
@@ -149,6 +152,7 @@ func GetNamespaceFolderMoID(
 		}
 		// Note that the Folder is VC-scoped, but we store the Folder MoID in each Zone CR
 		// so we can return the first match.
+		// Because ns always has at least one zone, no need to check deletion timestamp here.
 		for _, zone := range zones {
 			return zone.Spec.ManagedVMs.FolderMoID, nil
 		}

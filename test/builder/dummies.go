@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
@@ -39,6 +40,7 @@ const (
 	DummyStorageClassName  = "dummy-storage-class"
 	DummyResourceQuotaName = "dummy-resource-quota"
 	DummyZoneName          = "dummy-zone"
+	DummyDeletedZoneName   = "dummy-zone-deleted"
 )
 
 const (
@@ -90,14 +92,21 @@ func DummyNamedAvailabilityZone(name string) *topologyv1.AvailabilityZone {
 
 // DummyZone uses the same name with AZ.
 func DummyZone(namespace string) *topologyv1.Zone {
-	return DummyNamedZone(DummyZoneName, namespace)
-}
-
-func DummyNamedZone(name, namespace string) *topologyv1.Zone {
 	return &topologyv1.Zone{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      DummyZoneName,
 			Namespace: namespace,
+		},
+		Spec: topologyv1.ZoneSpec{},
+	}
+}
+
+func DummyDeletedZone(namespace string) *topologyv1.Zone {
+	return &topologyv1.Zone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              DummyDeletedZoneName,
+			Namespace:         namespace,
+			DeletionTimestamp: &metav1.Time{Time: time.Now()},
 		},
 		Spec: topologyv1.ZoneSpec{},
 	}

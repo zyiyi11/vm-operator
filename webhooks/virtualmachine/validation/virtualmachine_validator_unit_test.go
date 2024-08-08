@@ -317,6 +317,19 @@ func unitTestsValidateCreate() {
 					expectAllowed: false,
 				},
 			),
+			Entry("when Workload Domain Isolation FSS enabled, should deny when VM specifies valid availability zone, zone is being deleted",
+				testParams{
+					setup: func(ctx *unitValidatingWebhookContext) {
+						pkgcfg.SetContext(ctx, func(config *pkgcfg.Config) {
+							config.Features.WorkloadDomainIsolation = true
+						})
+						// DummyDeletedZone has DeletionTimestamp.
+						zoneName := builder.DummyDeletedZoneName
+						ctx.vm.Labels[topology.KubernetesTopologyZoneLabelKey] = zoneName
+					},
+					expectAllowed: false,
+				},
+			),
 			Entry("should deny when VM specifies valid availability zone, there are no availability zones or zones",
 				testParams{
 					setup: func(ctx *unitValidatingWebhookContext) {
