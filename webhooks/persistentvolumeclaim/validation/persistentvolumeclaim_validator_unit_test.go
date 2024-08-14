@@ -4,25 +4,41 @@
 package validation_test
 
 import (
+	"fmt"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 
+	topologyv1 "github.com/vmware-tanzu/vm-operator/external/tanzu-topology/api/v1alpha1"
+	pkgcfg "github.com/vmware-tanzu/vm-operator/pkg/config"
 	"github.com/vmware-tanzu/vm-operator/pkg/constants/testlabels"
 	"github.com/vmware-tanzu/vm-operator/pkg/providers/vsphere/constants"
+	"github.com/vmware-tanzu/vm-operator/pkg/topology"
 	"github.com/vmware-tanzu/vm-operator/test/builder"
 )
 
 const (
-	DummyLabelKey1   = "dummy-key-1"
-	DummyLabelKey2   = "dummy-key-2"
-	DummyLabelValue1 = "dummy-value-1"
-	DummyLabelValue2 = "dummy-value-2"
-	TrueString       = "true"
+	DummyLabelKey1     = "dummy-key-1"
+	DummyLabelKey2     = "dummy-key-2"
+	DummyLabelValue1   = "dummy-value-1"
+	DummyLabelValue2   = "dummy-value-2"
+	TrueString         = "true"
+	DummyZone          = "zone-to-delete"
+	DummyNamespaceName = "dummy-namespace-for-webhook-validation"
 )
+
+type testParams struct {
+	setup         func(ctx *unitValidatingWebhookContext)
+	validate      func(response admission.Response)
+	expectAllowed bool
+}
 
 func unitTests() {
 	Describe(
@@ -65,6 +81,8 @@ type unitValidatingWebhookContext struct {
 
 func newUnitTestContextForValidatingWebhook(isUpdate bool) *unitValidatingWebhookContext {
 	pvc := builder.DummyPersistentVolumeClaim()
+	pvc.Name = "dummy-pvc"
+	pvc.Namespace = DummyNamespaceName
 	obj, err := builder.ToUnstructured(pvc)
 	Expect(err).ToNot(HaveOccurred())
 
@@ -141,6 +159,50 @@ func unitTestsValidatePVCCreate() {
 		Entry("Service user, should allow with labels specific to instance storage", createArgs{isServiceUser: true, addInstanceStorageLabel: true}, true, nil, nil),
 		Entry("Service user, should allow with labels not specific to instance storage", createArgs{isServiceUser: true, addNonInstanceStorageLabel: true}, true, nil, nil),
 	)
+	doTest := func(args testParams) {
+		args.setup(ctx)
+
+		var err error
+		ctx.WebhookRequestContext.Obj, err = builder.ToUnstructured(ctx.pvc)
+		ExpectWithOffset(1, err).ToNot(HaveOccurred())
+
+		response := ctx.ValidateCreate(&ctx.WebhookRequestContext)
+		ExpectWithOffset(1, response.Allowed).To(Equal(args.expectAllowed))
+
+		if args.validate != nil {
+			args.validate(response)
+		}
+	}
+
+	Context("When Workload Domain Isolation FSS enabled", func() {
+		DescribeTable("create", doTest,
+			Entry("should disallow SSO user specify a zone that is being deleted",
+				testParams{
+					setup: func(ctx *unitValidatingWebhookContext) {
+						pkgcfg.SetContext(ctx, func(config *pkgcfg.Config) {
+							config.Features.WorkloadDomainIsolation = true
+						})
+						zoneName := builder.DummyZoneName
+						zone := &topologyv1.Zone{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      zoneName,
+								Namespace: DummyNamespaceName,
+							},
+						}
+						Expect(ctx.Client.Create(ctx, zone)).To(Succeed())
+						Expect(ctx.Client.Get(ctx, client.ObjectKey{Name: zoneName, Namespace: DummyNamespaceName}, zone))
+						zone.Finalizers = []string{"test"}
+						Expect(ctx.Client.Update(ctx, zone)).To(Succeed())
+						Expect(ctx.Client.Delete(ctx, zone)).To(Succeed())
+						ctx.pvc.Annotations = map[string]string{
+							constants.AnnGuestClusterRequestedTopology: fmt.Sprintf(`[{"%s":"%s"}]`, topology.KubernetesTopologyZoneLabelKey, DummyZone),
+						}
+					},
+					expectAllowed: true,
+				},
+			),
+		)
+	})
 }
 
 func unitTestsValidatePVCUpdate() {

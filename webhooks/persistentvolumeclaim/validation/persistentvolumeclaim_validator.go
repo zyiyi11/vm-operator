@@ -4,7 +4,9 @@
 package validation
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"reflect"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -15,11 +17,14 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlmgr "sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/vmware-tanzu/vm-operator/pkg/builder"
+	pkgcfg "github.com/vmware-tanzu/vm-operator/pkg/config"
 	pkgctx "github.com/vmware-tanzu/vm-operator/pkg/context"
 	"github.com/vmware-tanzu/vm-operator/pkg/providers/vsphere/constants"
+	"github.com/vmware-tanzu/vm-operator/pkg/topology"
 	"github.com/vmware-tanzu/vm-operator/webhooks/common"
 )
 
@@ -28,10 +33,12 @@ const (
 
 	operationNotAllowedOnPVC = "%s operation on PVC with instance storage label is not allowed"
 	addingISLabelNotAllowed  = "adding instance storage label is not allowed"
+	invalidZone              = "cannot use zone that is being deleted"
 )
 
 var (
 	labelPath                            = field.NewPath("metadata", "labels").Key(constants.InstanceStorageLabelKey)
+	annotationPath                       = field.NewPath("metadata", "annotation")
 	allowedAccountsForInstanceStoragePVC = map[string]struct{}{
 		"system:serviceaccount:kube-system:persistent-volume-binder":     {},
 		"system:serviceaccount:kube-system:pvc-protection-controller":    {},
@@ -68,8 +75,42 @@ type validator struct {
 	converter runtime.UnstructuredConverter
 }
 
+// vmFromUnstructured returns the VirtualMachine from the unstructured object.
+func (v validator) pvcFromUnstructured(obj runtime.Unstructured) (*corev1.PersistentVolumeClaim, error) {
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := v.converter.FromUnstructured(obj.UnstructuredContent(), pvc); err != nil {
+		return nil, err
+	}
+	return pvc, nil
+}
+
 func (v validator) For() schema.GroupVersionKind {
 	return corev1.SchemeGroupVersion.WithKind(reflect.TypeOf(corev1.PersistentVolumeClaim{}).Name())
+}
+
+func (v validator) validateSpecifyZone(ctx *pkgctx.WebhookRequestContext, pvc *corev1.PersistentVolumeClaim) field.ErrorList {
+	var fieldErrs field.ErrorList
+
+	volumeRequestedTopologies, err := getVolumeRequestedTopologyFromPVCAnnotation(pvc)
+	if err != nil {
+		return append(fieldErrs, field.Invalid(annotationPath, pvc.Annotations, err.Error()))
+	}
+	if volumeRequestedTopologies == nil {
+		return fieldErrs
+	}
+	for _, topo := range volumeRequestedTopologies {
+		if zoneName, ok := topo[constants.AnnGuestClusterRequestedTopology]; ok {
+			zone, err := topology.GetZone(ctx.Context, v.client, zoneName, pvc.Namespace)
+			if err != nil {
+				return append(fieldErrs, field.Invalid(annotationPath, pvc.Name, err.Error()))
+			}
+			//  when deletion of a Zone is initiated, deletionTimestamp is set.
+			if !zone.DeletionTimestamp.IsZero() {
+				return append(fieldErrs, field.Invalid(annotationPath, pvc.Name, invalidZone))
+			}
+		}
+	}
+	return fieldErrs
 }
 
 /* NOTE: If the user is privileged user, the request will not be validated.*/
@@ -84,7 +125,13 @@ func (v validator) ValidateCreate(ctx *pkgctx.WebhookRequestContext) admission.R
 		fieldErrs = append(fieldErrs, field.Forbidden(labelPath,
 			fmt.Sprintf(operationNotAllowedOnPVC, admissionv1.Create)))
 	}
-
+	if pkgcfg.FromContext(ctx).Features.WorkloadDomainIsolation {
+		pvc, err := v.pvcFromUnstructured(ctx.Obj)
+		if err != nil {
+			return webhook.Errored(http.StatusBadRequest, err)
+		}
+		fieldErrs = append(fieldErrs, v.validateSpecifyZone(ctx, pvc)...)
+	}
 	return common.BuildValidationResponse(ctx, nil, convertToStringArray(fieldErrs), nil)
 }
 
@@ -150,4 +197,21 @@ func isPrivilegedAccountForISPVC(ctx *pkgctx.WebhookRequestContext) bool {
 	}
 
 	return false
+}
+
+// getVolumeAccessibleTopologyFromPVCAnnotation returns requested topologies generated using
+// PVC annotation "csi.vsphere.volume-requested-topology".
+func getVolumeRequestedTopologyFromPVCAnnotation(pvc *corev1.PersistentVolumeClaim) ([]map[string]string, error) {
+	volumeRequestedTopology := pvc.Annotations[constants.AnnGuestClusterRequestedTopology]
+	if volumeRequestedTopology == "" {
+		return nil, nil
+	}
+	volumeRequestedTopologyArr := make([]map[string]string, 0)
+	err := json.Unmarshal([]byte(volumeRequestedTopology), &volumeRequestedTopologyArr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse annotation: %q value %v from the claim: %q, namespace: %q. "+
+			"err: %v", constants.AnnGuestClusterRequestedTopology, volumeRequestedTopology,
+			pvc.Name, pvc.Namespace, err)
+	}
+	return volumeRequestedTopologyArr, nil
 }

@@ -79,6 +79,10 @@ const (
 	// CSI reference to this annotation where it is defined:
 	// https://github.com/kubernetes-sigs/vsphere-csi-driver/blob/master/pkg/syncer/k8scloudoperator/placement.go
 	InstanceStoragePVPlacementErrorAnnotationKey = "failure-domain.beta.vmware.com/storagepool"
+	// AnnGuestClusterRequestedTopology annotation key to provision PVC on specific zone.
+	// CSI reference to this annotation where it is defined:
+	// https://github.com/kubernetes-sigs/vsphere-csi-driver/blob/master/pkg/csi/service/common/constants.go
+	AnnGuestClusterRequestedTopology = "csi.vsphere.volume-requested-topology"
 	// InstanceStorageSelectedNodeMOIDAnnotationKey value corresponds to MOID of ESXi node that is elected to place instance storage volumes.
 	InstanceStorageSelectedNodeMOIDAnnotationKey = "vmoperator.vmware.com/instance-storage-selected-node-moid"
 	// InstanceStorageSelectedNodeAnnotationKey value corresponds to FQDN of ESXi node that is elected to place instance storage volumes.
